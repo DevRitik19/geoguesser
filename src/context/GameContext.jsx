@@ -9,25 +9,29 @@ export const GameProvider = ({ children }) => {
   const [countries, setCountries] = useState([]);
   const [targetCountry, setTargetCountry] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null); // API load failure
+  const [loadError, setLoadError] = useState(null);
 
-  // Game state
   const [gameState, setGameState] = useState('playing');
   const [guesses, setGuesses] = useState([]);
   const [initialHint, setInitialHint] = useState('');
   const [error, setError] = useState(null);
   const MAX_GUESSES = 6;
 
-  // Keep a stable ref to countries so callbacks can always read the latest value
-  // without needing to be in their dependency arrays.
+  // Stable ref so callbacks always read fresh country list
   const countriesRef = useRef([]);
   useEffect(() => { countriesRef.current = countries; }, [countries]);
 
-  // ── Pick a new random target from a given list ────────────────────────────
-  // We accept an explicit `data` argument so callers can pass fresh data
-  // right after loading — before React has flushed the setCountries update.
+  // Smart population formatter — avoids "0.0 million" for tiny countries
+  const formatPop = (n) => {
+    if (!n || n === 0) return 'an unknown number of';
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)} billion`;
+    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)} million`;
+    if (n >= 1_000)         return `about ${Math.round(n / 1_000)} thousand`;
+    return n.toLocaleString(); // exact for very small populations
+  };
+
+  // ── Pick a new random target ──────────────────────────────────────────────
   const startNewGame = useCallback((data) => {
-    // Prefer the argument; fall back to the ref so we always have fresh data.
     const source = data ?? countriesRef.current;
     if (!source || source.length === 0) return;
 
@@ -37,7 +41,7 @@ export const GameProvider = ({ children }) => {
     setGameState('playing');
 
     const hints = [
-      `It has a population of roughly ${(selected.population / 1000000).toFixed(1)} million people.`,
+      `It has a population of roughly ${formatPop(selected.population)} people.`,
       selected.subregion && selected.subregion !== 'Unknown'
         ? `This territory is located in the ${selected.subregion} subregion.`
         : null,
@@ -56,7 +60,7 @@ export const GameProvider = ({ children }) => {
     setError(null);
   }, []); // stable — reads data from argument or ref
 
-  // ── Load countries (with retry built into fetchCountries) ─────────────────
+  // ── Load countries ────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -64,7 +68,7 @@ export const GameProvider = ({ children }) => {
       const data = await fetchCountries();
       if (!data || data.length === 0) throw new Error('No country data returned.');
       setCountries(data);
-      startNewGame(data); // pass data directly to avoid stale-closure crash
+      startNewGame(data);
     } catch (err) {
       console.error('Failed to load countries:', err);
       setLoadError(err.message || 'Failed to load country data. Please retry.');
@@ -75,7 +79,7 @@ export const GameProvider = ({ children }) => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // ── Save win/loss stats to Firestore ──────────────────────────────────────
+  // ── Save stats to Firestore ───────────────────────────────────────────────
   const saveGameStats = useCallback(async (isWin) => {
     try {
       if (!auth.currentUser) return;
@@ -120,7 +124,7 @@ export const GameProvider = ({ children }) => {
     targetCountry,
     loading,
     loadError,
-    retryLoad: loadData,  // expose so Game page can show a retry button
+    retryLoad: loadData,
     gameState,
     guesses,
     initialHint,
