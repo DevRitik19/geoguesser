@@ -20,7 +20,7 @@ const Game = () => {
     startNewGame 
   } = useContext(GameContext);
 
-  const [showLabels, setShowLabels] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
 
   if (loading) {
     return (

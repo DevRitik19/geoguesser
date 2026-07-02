@@ -32,8 +32,10 @@ const GlobeMap = ({ countries = [], guesses, targetCountry, gameState, showLabel
   useEffect(() => {
     let lastState = { lat: 0, lng: 0, alt: 2.5 };
     let frameId;
+    let active = true; // flag to stop the loop if the component unmounts
 
     const trackCamera = () => {
+      if (!active) return; // stop loop if unmounted
       if (globeEl.current) {
         const controls = globeEl.current.controls();
         if (controls) {
@@ -57,9 +59,14 @@ const GlobeMap = ({ countries = [], guesses, targetCountry, gameState, showLabel
       frameId = requestAnimationFrame(trackCamera);
     };
 
-    // Delay start slightly to wait for initialization
-    setTimeout(() => { trackCamera(); }, 500);
-    return () => cancelAnimationFrame(frameId);
+    // Delay start slightly to wait for globe initialization
+    const timerId = setTimeout(() => { if (active) trackCamera(); }, 500);
+
+    return () => {
+      active = false;           // prevent loop from scheduling new frames
+      clearTimeout(timerId);    // cancel pending start if unmounted early
+      cancelAnimationFrame(frameId); // cancel any in-flight frame
+    };
   }, []);
 
   // Set initial camera position after globe mounts
@@ -121,25 +128,36 @@ const GlobeMap = ({ countries = [], guesses, targetCountry, gameState, showLabel
 
     // Only process labels if showLabels is true (or game is over and target is shown)
     if (showLabels) {
-      // LOD Calculations
-      if (alt > 1.8) {
-        // Zoomed out - show nothing
+      // LOD (Level-of-Detail) — threshold raised to 2.5 so labels are visible
+      // at the globe's default zoom, not just when extremely close.
+      if (alt > 2.5) {
+        // Very far out — show nothing to avoid clutter
         visibleCountries = [];
       } else {
-        // Pool constraint based on altitude
-        let pool = alt > 0.8 ? countries.filter(c => c.population > 20000000) : countries;
+        // Pool constraint based on altitude:
+        //   alt > 1.5  → only large countries (pop > 50M)
+        //   alt > 0.8  → medium countries (pop > 20M)
+        //   closer     → all countries
+        let pool;
+        if (alt > 1.5) {
+          pool = countries.filter(c => c.population > 50000000);
+        } else if (alt > 0.8) {
+          pool = countries.filter(c => c.population > 20000000);
+        } else {
+          pool = countries;
+        }
         
-        // Calculate distances to camera perspective center
+        // Calculate distances from camera center to each country
         const withDistance = pool.map(c => ({
           ...c,
           distToCenter: calculateDistance(lat, lng, c.lat, c.lng)
         }));
 
-        // Sort mathematically nearest first
+        // Sort nearest first
         withDistance.sort((a, b) => a.distToCenter - b.distToCenter);
 
-        // Slicing strictly to prevent clutter & overlap!
-        const limit = alt > 0.8 ? 6 : 10;
+        // Cap label count to avoid visual clutter
+        const limit = alt > 1.5 ? 8 : alt > 0.8 ? 12 : 15;
         visibleCountries = withDistance.slice(0, limit);
       }
     }
