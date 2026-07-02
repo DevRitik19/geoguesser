@@ -1,44 +1,85 @@
-// Country data sources, tried in order.
-// - In production: our own Vercel proxy (/api/countries) first
-// - jsDelivr CDN serves the same `world-countries` package that powers
-//   restcountries.com — very high uptime, global CDN
-// - restcountries.com directly as last resort
+// In development, call restcountries.com directly, falling back to a github mirror.
+// In production, call our own serverless proxy /api/countries, falling back to the github mirror.
 const SOURCES = import.meta.env.DEV
   ? [
       'https://restcountries.com/v3.1/all?fields=name,capital,population,flags,region,subregion,languages,currencies,latlng,cca3',
-      'https://cdn.jsdelivr.net/npm/world-countries@5.0.0/countries.json',
+      'https://raw.githubusercontent.com/jbrekalo/rest-countries-api/master/data.json'
     ]
   : [
       '/api/countries',
-      'https://cdn.jsdelivr.net/npm/world-countries@5.0.0/countries.json',
-      'https://restcountries.com/v3.1/all?fields=name,capital,population,flags,region,subregion,languages,currencies,latlng,cca3',
+      'https://raw.githubusercontent.com/jbrekalo/rest-countries-api/master/data.json'
     ];
 
-// Map raw country object to our app's schema.
-// Handles both restcountries.com and world-countries package formats.
 const mapCountry = (country) => {
-  // latlng must be a valid array with two elements
   if (!Array.isArray(country.latlng) || country.latlng.length < 2) return null;
 
-  // Flag: prefer .svg, fall back to flagcdn.com using cca2
-  const flag =
-    country.flags?.svg ||
-    country.flags?.png ||
-    (country.cca2 ? `https://flagcdn.com/${country.cca2.toLowerCase()}.svg` : '');
+  // Normalize Name
+  const name = country.name?.common || country.name;
+  if (!name) return null;
+
+  // Normalize Capital
+  const capital = Array.isArray(country.capital) 
+    ? country.capital[0] 
+    : (country.capital || 'Unknown');
+
+  // Normalize Flag
+  const flag = country.flags?.svg || country.flags?.png || country.flag || '';
+
+  // Normalize Languages (mledoze version is array of objects, restcountries is key-value object)
+  let languages = null;
+  if (country.languages) {
+    if (Array.isArray(country.languages)) {
+      languages = {};
+      country.languages.forEach((l, idx) => {
+        languages[idx] = l.name;
+      });
+    } else {
+      languages = country.languages;
+    }
+  }
+
+  // Normalize Currencies (mledoze version is array of objects, restcountries is key-value object)
+  let currencies = null;
+  if (country.currencies) {
+    if (Array.isArray(country.currencies)) {
+      currencies = {};
+      country.currencies.forEach((c) => {
+        const code = c.code || Object.keys(c)[0];
+        if (code) {
+          currencies[code] = { name: c.name, symbol: c.symbol };
+        }
+      });
+    } else {
+      currencies = country.currencies;
+    }
+  }
 
   return {
-    id: country.cca3,
-    name: country.name?.common || country.name,
-    capital: Array.isArray(country.capital) ? country.capital[0] : (country.capital || 'Unknown'),
+    id: country.cca3 || country.alpha3Code,
+    name,
+    capital,
     population: country.population || 0,
     region: country.region || 'Unknown',
     subregion: country.subregion || 'Unknown',
-    languages: country.languages || null,
-    currencies: country.currencies || null,
+    languages,
+    currencies,
     flag,
     lat: country.latlng[0],
-    lng: country.latlng[1],
+    lng: country.latlng[1]
   };
+};
+
+const fetchWithRetry = async (url, retries = 3) => {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      if (attempt === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+    }
+  }
 };
 
 export const fetchCountries = async () => {
@@ -46,21 +87,17 @@ export const fetchCountries = async () => {
 
   for (const url of SOURCES) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        lastError = new Error(`HTTP ${res.status} from ${url}`);
+      const response = await fetchWithRetry(url);
+      const data = await response.json();
+
+      // Skip invalid formats
+      const dataArray = Array.isArray(data) ? data : (data.data && Array.isArray(data.data) ? data.data : null);
+      if (!dataArray) {
+        lastError = new Error(`Invalid format from ${url}`);
         continue;
       }
 
-      const data = await res.json();
-
-      // Skip responses that are error objects instead of arrays
-      if (!Array.isArray(data)) {
-        lastError = new Error(`Non-array response from ${url}: ${JSON.stringify(data).slice(0, 100)}`);
-        continue;
-      }
-
-      const mapped = data.map(mapCountry).filter(Boolean);
+      const mapped = dataArray.map(mapCountry).filter(Boolean);
       if (mapped.length === 0) {
         lastError = new Error(`Empty country list from ${url}`);
         continue;
@@ -68,9 +105,9 @@ export const fetchCountries = async () => {
 
       console.log(`[api] Loaded ${mapped.length} countries from: ${url}`);
       return mapped;
-    } catch (err) {
-      lastError = err;
-      console.warn(`[api] Source failed (${url}):`, err.message);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[api] Source failed (${url}):`, error.message);
     }
   }
 

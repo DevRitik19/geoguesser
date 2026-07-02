@@ -1,9 +1,9 @@
 // Vercel Serverless Function — proxies country data server-side.
-// Tries restcountries.com first, falls back to jsDelivr CDN.
+// Tries restcountries.com first, falls back to a highly reliable static JSON backup with population.
 
 const UPSTREAM_SOURCES = [
   'https://restcountries.com/v3.1/all?fields=name,capital,population,flags,region,subregion,languages,currencies,latlng,cca3',
-  'https://cdn.jsdelivr.net/npm/world-countries@5.0.0/countries.json',
+  'https://raw.githubusercontent.com/jbrekalo/rest-countries-api/master/data.json',
 ];
 
 export default async function handler(req, res) {
