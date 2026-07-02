@@ -5,12 +5,14 @@ import GuessInput from '../components/GuessInput';
 import HintCard from '../components/HintCard';
 import CountryCard from '../components/CountryCard';
 import GlobeMap from '../components/GlobeMap';
-import { Globe2, RefreshCw, Lightbulb, Target, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Globe2, RefreshCw, Lightbulb, Target, AlertCircle, Eye, EyeOff, WifiOff } from 'lucide-react';
 
 const Game = () => {
   const { 
     countries,
-    loading, 
+    loading,
+    loadError,
+    retryLoad,
     gameState, 
     guesses, 
     initialHint,
@@ -24,8 +26,34 @@ const Game = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[60vh]">
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <p className="text-slate-400 text-sm animate-pulse">Loading world data…</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-6 text-center px-4">
+        <div className="w-20 h-20 rounded-full bg-red-900/30 border border-red-500/30 flex items-center justify-center">
+          <WifiOff className="w-10 h-10 text-red-400" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-2">Connection Failed</h2>
+          <p className="text-slate-400 max-w-sm">
+            Could not load country data from the server. Please check your internet connection and try again.
+          </p>
+          <p className="text-slate-600 text-xs mt-2">{loadError}</p>
+        </div>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={retryLoad}
+          className="flex items-center gap-2 bg-primary hover:bg-blue-600 text-white font-bold px-8 py-3 rounded-xl transition-all shadow-lg"
+        >
+          <RefreshCw className="w-5 h-5" /> Retry
+        </motion.button>
       </div>
     );
   }
