@@ -1,31 +1,26 @@
-// NOTE: We call our own Vercel proxy (/api/countries) instead of the external
-// restcountries.com URL directly. This sidesteps CORS issues entirely because
-// the request is same-origin from the browser's perspective; the Vercel function
-// performs the outbound fetch server-side.
-const COUNTRIES_API_URL = '/api/countries';
+// In development (Vite local server), call restcountries.com directly.
+// In production (Vercel), call our own serverless proxy at /api/countries
+// which fetches server-side — no CORS issues.
+const COUNTRIES_API_URL = import.meta.env.DEV
+  ? 'https://restcountries.com/v3.1/all?fields=name,capital,population,flags,region,subregion,languages,currencies,latlng,cca3'
+  : '/api/countries';
 
-// Retry fetch with exponential backoff and a per-attempt timeout
-const fetchWithRetry = async (url, { retries = 3, timeoutMs = 12000 } = {}) => {
+// Simple retry with exponential backoff
+const fetchWithRetry = async (url, retries = 3) => {
   for (let attempt = 0; attempt < retries; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res;
     } catch (err) {
-      clearTimeout(timer);
-      const isLast = attempt === retries - 1;
-      if (isLast) throw err;
-      // Exponential backoff: 1s → 2s → 4s
+      if (attempt === retries - 1) throw err;
       await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
   }
 };
 
 export const fetchCountries = async () => {
-  const response = await fetchWithRetry(COUNTRIES_API_URL); // throws on total failure
+  const response = await fetchWithRetry(COUNTRIES_API_URL);
   const data = await response.json();
 
   return data
